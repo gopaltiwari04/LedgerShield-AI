@@ -55,7 +55,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen w-full flex bg-[#070D18]">
       {/* Left Column: Focused Authentication Form */}
-      <div className="w-full lg:w-1/2 min-h-screen flex flex-col justify-between p-8 sm:p-12 lg:p-16 z-10 bg-[#0B132B]/40">
+      <div className="w-full lg:w-[440px] xl:w-[480px] shrink-0 min-h-screen flex flex-col justify-between p-8 sm:p-12 lg:p-14 z-10 bg-[#070D18] border-r border-slate-800/80">
         {/* Brand Mark */}
         <div>
           <Link href="/login" className="inline-flex items-center gap-2.5 group">
@@ -69,7 +69,7 @@ export default function LoginPage() {
         </div>
 
         {/* Center Form Container */}
-        <div className="w-full max-w-sm mx-auto my-auto py-10">
+        <div className="w-full max-w-sm mx-auto my-auto py-8">
           <div className="mb-8">
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
               Welcome back.
@@ -179,8 +179,8 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* Right Column: Single striking, calm, cohesive visual composition */}
-      <div className="hidden lg:flex lg:w-1/2">
+      {/* Right Column: Interactive AI Feature Showcase */}
+      <div className="hidden lg:flex flex-1 min-w-0 min-h-screen bg-[#060B14] overflow-hidden relative">
         <LoginVisualPanel />
       </div>
     </div>

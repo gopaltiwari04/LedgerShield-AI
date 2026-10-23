@@ -14,7 +14,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   if (isAuthPage) {
     return (
-      <main className="min-h-screen bg-[#070D18] text-white">
+      <main className="min-h-screen w-full flex-1 bg-[#070D18] text-white">
         {children}
       </main>
     );

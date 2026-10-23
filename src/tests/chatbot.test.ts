@@ -54,8 +54,11 @@ describe("LedgerShield AI: Assistant Chatbot & Knowledge Base", () => {
     sessionToken = await createSessionToken({
       userId: user.id,
       email: user.email,
+      name: user.name,
       organizationId: testOrgId,
+      organizationName: "Test Org",
       role: "INTERNAL_AUDITOR",
+      approvalLimit: 100000,
     });
   });
 
