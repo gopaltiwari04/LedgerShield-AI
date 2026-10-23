@@ -1,0 +1,775 @@
+// LedgerShield AI - Production PostgreSQL Schema
+// Switch to this schema in production environments by pointing PRISMA_SCHEMA=prisma/schema.postgresql.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -------------------------------------------------------------
+// Core Tenant & Identity Management
+// -------------------------------------------------------------
+
+model Organization {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String   @db.VarChar(255)
+  legalName       String?  @db.VarChar(255)
+  gstin           String?  @db.VarChar(15)
+  pan             String?  @db.VarChar(10)
+  state           String?  @db.VarChar(100)
+  currency        String   @default("INR") @db.VarChar(10)
+  address         String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  memberships     OrganizationMembership[]
+  suppliers       Supplier[]
+  purchaseOrders  PurchaseOrder[]
+  invoices        Invoice[]
+  goodsReceipts   GoodsReceipt[]
+  deliveryChallans DeliveryChallan[]
+  creditNotes     CreditNote[]
+  debitNotes      DebitNote[]
+  payments        Payment[]
+  supplierStatements SupplierStatement[]
+  documents       UploadedDocument[]
+  reconciliationRuns ReconciliationRun[]
+  findings        DiscrepancyFinding[]
+  investigations  Investigation[]
+  auditEvents     AuditEvent[]
+  ruleConfigurations RuleConfiguration[]
+  recoveries      RecoveryRecord[]
+  invitations     OrganizationInvitation[]
+
+  @@index([gstin])
+}
+
+model User {
+  id              String   @id @default(uuid()) @db.Uuid
+  email           String   @unique @db.VarChar(255)
+  name            String   @db.VarChar(255)
+  passwordHash    String?  @db.VarChar(255)
+  avatarUrl       String?  @db.Text
+  department      String?  @db.VarChar(100)
+  designation     String?  @db.VarChar(100)
+  isActive        Boolean  @default(true)
+  isEmailVerified Boolean  @default(false)
+  deactivatedAt   DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  memberships     OrganizationMembership[]
+  comments        ReviewerComment[]
+  assignedFindings DiscrepancyFinding[] @relation("AssignedAuditor")
+  approvals       Approval[]
+  auditEvents     AuditEvent[]
+  passwordResetTokens PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
+  sentInvitations OrganizationInvitation[] @relation("InvitedByUser")
+
+  @@index([email])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  tokenHash String   @unique @db.VarChar(255)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tokenHash])
+}
+
+model EmailVerificationToken {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  email      String   @db.VarChar(255)
+  tokenHash  String   @unique @db.VarChar(255)
+  expiresAt  DateTime
+  verifiedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tokenHash])
+}
+
+model OrganizationInvitation {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid
+  email          String    @db.VarChar(255)
+  role           String    @default("INTERNAL_AUDITOR") @db.VarChar(50)
+  approvalLimit  Float     @default(50000.0)
+  tokenHash      String    @unique @db.VarChar(255)
+  invitedById    String?   @db.Uuid
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy      User?        @relation("InvitedByUser", fields: [invitedById], references: [id])
+
+  @@index([tokenHash])
+  @@index([organizationId, email])
+}
+
+model OrganizationMembership {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  userId          String   @db.Uuid
+  role            String   @db.VarChar(50) // "ADMIN" | "FINANCE_MANAGER" | "AP_OPERATOR" | "PROCUREMENT_MANAGER" | "WAREHOUSE_OPERATOR" | "INTERNAL_AUDITOR" | "READ_ONLY_EXEC"
+  approvalLimit   Float    @default(50000.0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+// -------------------------------------------------------------
+// Master Data: Suppliers & Accounts
+// -------------------------------------------------------------
+
+model Supplier {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  vendorCode      String   @db.VarChar(50)
+  legalName       String   @db.VarChar(255)
+  tradeName       String?  @db.VarChar(255)
+  gstin           String?  @db.VarChar(15)
+  pan             String?  @db.VarChar(10)
+  stateCode       String?  @db.VarChar(10)
+  address         String?  @db.Text
+  email           String?  @db.VarChar(255)
+  phone           String?  @db.VarChar(50)
+  paymentTermsDays Int     @default(30)
+  riskScore       Float    @default(0.0)
+  isSuspended     Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  bankAccounts    SupplierBankAccount[]
+  purchaseOrders  PurchaseOrder[]
+  invoices        Invoice[]
+  goodsReceipts   GoodsReceipt[]
+  creditNotes     CreditNote[]
+  debitNotes      DebitNote[]
+  payments        Payment[]
+  statements      SupplierStatement[]
+  findings        DiscrepancyFinding[]
+
+  @@unique([organizationId, vendorCode])
+  @@index([organizationId])
+  @@index([gstin])
+}
+
+model SupplierBankAccount {
+  id              String   @id @default(uuid()) @db.Uuid
+  supplierId      String   @db.Uuid
+  bankName        String   @db.VarChar(255)
+  accountNumber   String   @db.VarChar(100)
+  ifscCode        String   @db.VarChar(20)
+  branchName      String?  @db.VarChar(255)
+  isVerified      Boolean  @default(false)
+  lastChangedAt   DateTime @default(now())
+  changedByUserId String?  @db.Uuid
+  createdAt       DateTime @default(now())
+
+  supplier        Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@index([supplierId])
+  @@index([accountNumber])
+}
+
+// -------------------------------------------------------------
+// Transactional Documents: PO, Invoices, Receipts
+// -------------------------------------------------------------
+
+model PurchaseOrder {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  supplierId      String   @db.Uuid
+  poNumber        String   @db.VarChar(100)
+  poDate          DateTime
+  status          String   @default("APPROVED") @db.VarChar(50)
+  subtotal        Float
+  taxAmount       Float    @default(0.0)
+  totalAmount     Float
+  currency        String   @default("INR") @db.VarChar(10)
+  deliveryDate    DateTime?
+  paymentTerms    String?  @db.VarChar(100)
+  createdBy       String?  @db.VarChar(255)
+  approvedBy      String?  @db.VarChar(255)
+  approvalDate    DateTime?
+  notes           String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  supplier        Supplier     @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  lines           PurchaseOrderLine[]
+  amendments      PurchaseOrderAmendment[]
+  invoices        Invoice[]
+  goodsReceipts   GoodsReceipt[]
+  findings        DiscrepancyFinding[]
+
+  @@unique([organizationId, poNumber])
+  @@index([organizationId])
+  @@index([supplierId])
+}
+
+model PurchaseOrderLine {
+  id              String   @id @default(uuid()) @db.Uuid
+  purchaseOrderId String   @db.Uuid
+  lineNumber      Int
+  itemDescription String   @db.Text
+  sku             String?  @db.VarChar(100)
+  hsnCode         String?  @db.VarChar(20)
+  orderedQuantity Float
+  unitOfMeasure   String   @default("PCS") @db.VarChar(20)
+  unitPrice       Float
+  discountAmount  Float    @default(0.0)
+  taxRate         Float    @default(18.0)
+  taxAmount       Float    @default(0.0)
+  lineTotal       Float
+
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  invoiceLines    InvoiceLine[]
+  receiptLines    GoodsReceiptLine[]
+
+  @@index([purchaseOrderId])
+}
+
+model PurchaseOrderAmendment {
+  id              String   @id @default(uuid()) @db.Uuid
+  purchaseOrderId String   @db.Uuid
+  amendmentNumber Int
+  amendmentDate   DateTime
+  reason          String   @db.Text
+  previousAmount  Float
+  newAmount       Float
+  approvedBy      String?  @db.VarChar(255)
+  createdAt       DateTime @default(now())
+
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseOrderId])
+}
+
+model Invoice {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  supplierId      String   @db.Uuid
+  purchaseOrderId String?  @db.Uuid
+  invoiceNumber   String   @db.VarChar(100)
+  invoiceDate     DateTime
+  dueDate         DateTime?
+  documentType    String   @default("TAX_INVOICE") @db.VarChar(50)
+  status          String   @default("PENDING_REVIEW") @db.VarChar(50)
+  subtotal        Float
+  cgstAmount      Float    @default(0.0)
+  sgstAmount      Float    @default(0.0)
+  igstAmount      Float    @default(0.0)
+  totalTaxAmount  Float    @default(0.0)
+  totalAmount     Float
+  paidAmount      Float    @default(0.0)
+  currency        String   @default("INR") @db.VarChar(10)
+  placeOfSupply   String?  @db.VarChar(100)
+  supplierGstin   String?  @db.VarChar(15)
+  buyerGstin      String?  @db.VarChar(15)
+  pdfFileUrl      String?  @db.Text
+  ocrConfidence   Float?   @default(1.0)
+  sourceDocumentId String? @db.Uuid
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  supplier        Supplier     @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  lines           InvoiceLine[]
+  goodsReceipts   GoodsReceipt[]
+  paymentAllocations PaymentAllocation[]
+  creditNotes     CreditNote[]
+  findings        DiscrepancyFinding[]
+
+  @@unique([organizationId, supplierId, invoiceNumber])
+  @@index([organizationId])
+  @@index([supplierId])
+  @@index([invoiceNumber])
+}
+
+model InvoiceLine {
+  id              String   @id @default(uuid()) @db.Uuid
+  invoiceId       String   @db.Uuid
+  poLineId        String?  @db.Uuid
+  lineNumber      Int
+  itemDescription String   @db.Text
+  sku             String?  @db.VarChar(100)
+  hsnCode         String?  @db.VarChar(20)
+  billedQuantity  Float
+  unitOfMeasure   String   @default("PCS") @db.VarChar(20)
+  unitPrice       Float
+  taxRate         Float    @default(18.0)
+  cgstAmount      Float    @default(0.0)
+  sgstAmount      Float    @default(0.0)
+  igstAmount      Float    @default(0.0)
+  lineTotal       Float
+
+  invoice         Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  poLine          PurchaseOrderLine? @relation(fields: [poLineId], references: [id])
+
+  @@index([invoiceId])
+}
+
+model GoodsReceipt {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  supplierId      String   @db.Uuid
+  purchaseOrderId String?  @db.Uuid
+  invoiceId       String?  @db.Uuid
+  grnNumber       String   @db.VarChar(100)
+  grnDate         DateTime
+  challanNumber   String?  @db.VarChar(100)
+  receivedBy      String?  @db.VarChar(255)
+  warehouseLocation String? @db.VarChar(100)
+  status          String   @default("COMPLETED") @db.VarChar(50)
+  remarks         String?  @db.Text
+  sourceDocumentId String? @db.Uuid
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  supplier        Supplier     @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  invoice         Invoice?     @relation(fields: [invoiceId], references: [id])
+  lines           GoodsReceiptLine[]
+  findings        DiscrepancyFinding[]
+
+  @@unique([organizationId, grnNumber])
+  @@index([organizationId])
+}
+
+model GoodsReceiptLine {
+  id              String   @id @default(uuid()) @db.Uuid
+  goodsReceiptId  String   @db.Uuid
+  poLineId        String?  @db.Uuid
+  lineNumber      Int
+  itemDescription String   @db.Text
+  receivedQuantity Float
+  acceptedQuantity Float
+  rejectedQuantity Float   @default(0.0)
+  unitOfMeasure   String   @default("PCS") @db.VarChar(20)
+  rejectionReason String?  @db.Text
+
+  goodsReceipt    GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  poLine          PurchaseOrderLine? @relation(fields: [poLineId], references: [id])
+
+  @@index([goodsReceiptId])
+}
+
+model DeliveryChallan {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  challanNumber   String   @db.VarChar(100)
+  challanDate     DateTime
+  vehicleNumber   String?  @db.VarChar(50)
+  transporterName String?  @db.VarChar(255)
+  poReference     String?  @db.VarChar(100)
+  notes           String?  @db.Text
+  createdAt       DateTime @default(now())
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, challanNumber])
+  @@index([organizationId])
+}
+
+model Payment {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  supplierId      String   @db.Uuid
+  paymentReference String  @db.VarChar(100)
+  paymentDate     DateTime
+  amount          Float
+  paymentMode     String   @default("NEFT") @db.VarChar(50)
+  bankAccountRef  String?  @db.VarChar(100)
+  beneficiaryAccount String? @db.VarChar(100)
+  status          String   @default("SETTLED") @db.VarChar(50)
+  initiatedBy     String?  @db.VarChar(255)
+  approvedBy      String?  @db.VarChar(255)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  supplier        Supplier     @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  allocations     PaymentAllocation[]
+  findings        DiscrepancyFinding[]
+
+  @@unique([organizationId, paymentReference])
+  @@index([organizationId])
+}
+
+model PaymentAllocation {
+  id              String   @id @default(uuid()) @db.Uuid
+  paymentId       String   @db.Uuid
+  invoiceId       String   @db.Uuid
+  allocatedAmount Float
+  createdAt       DateTime @default(now())
+
+  payment         Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoice         Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@index([invoiceId])
+}
+
+model CreditNote {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  supplierId      String   @db.Uuid
+  invoiceId       String?  @db.Uuid
+  creditNoteNumber String  @db.VarChar(100)
+  creditDate      DateTime
+  amount          Float
+  reason          String?  @db.Text
+  isApplied       Boolean  @default(false)
+  appliedToInvoiceId String? @db.Uuid
+  sourceDocumentId String? @db.Uuid
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  supplier        Supplier     @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  invoice         Invoice?     @relation(fields: [invoiceId], references: [id])
+  findings        DiscrepancyFinding[]
+
+  @@unique([organizationId, supplierId, creditNoteNumber])
+  @@index([organizationId])
+}
+
+model DebitNote {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  supplierId      String   @db.Uuid
+  debitNoteNumber String   @db.VarChar(100)
+  debitDate       DateTime
+  amount          Float
+  reason          String?  @db.Text
+  createdAt       DateTime @default(now())
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  supplier        Supplier     @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, supplierId, debitNoteNumber])
+  @@index([organizationId])
+}
+
+model SupplierStatement {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  supplierId      String   @db.Uuid
+  statementDate   DateTime
+  periodStart     DateTime
+  periodEnd       DateTime
+  openingBalance  Float
+  closingBalance  Float
+  calculatedBalance Float?
+  status          String   @default("UNRECONCILED") @db.VarChar(50)
+  createdAt       DateTime @default(now())
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  supplier        Supplier     @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  entries         SupplierStatementEntry[]
+
+  @@index([organizationId])
+}
+
+model SupplierStatementEntry {
+  id                  String   @id @default(uuid()) @db.Uuid
+  supplierStatementId String   @db.Uuid
+  entryDate           DateTime
+  referenceNumber     String   @db.VarChar(100)
+  documentType        String   @db.VarChar(50)
+  debitAmount         Float    @default(0.0)
+  creditAmount        Float    @default(0.0)
+  runningBalance      Float?
+  isMatchedInternal   Boolean  @default(false)
+  matchedInternalRef  String?  @db.VarChar(100)
+
+  statement           SupplierStatement @relation(fields: [supplierStatementId], references: [id], onDelete: Cascade)
+
+  @@index([supplierStatementId])
+}
+
+model UploadedDocument {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  filename        String   @db.VarChar(255)
+  fileSize        Int
+  mimeType        String   @db.VarChar(100)
+  storagePath     String   @db.Text
+  fileHashSha256  String   @db.VarChar(64)
+  documentType    String   @db.VarChar(50)
+  status          String   @default("PARSED") @db.VarChar(50)
+  confidenceScore Float    @default(1.0)
+  uploadedBy      String?  @db.VarChar(255)
+  metadataJson    String?  @db.Text
+  createdAt       DateTime @default(now())
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  extractedFields ExtractedField[]
+
+  @@index([organizationId])
+  @@index([fileHashSha256])
+}
+
+model ExtractedField {
+  id              String   @id @default(uuid()) @db.Uuid
+  documentId      String   @db.Uuid
+  fieldName       String   @db.VarChar(100)
+  fieldValue      String   @db.Text
+  confidence      Float    @default(1.0)
+  pageNumber      Int      @default(1)
+  boundingBoxJson String?  @db.Text
+  isVerified      Boolean  @default(false)
+  correctedValue  String?  @db.Text
+
+  document        UploadedDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+}
+
+model ReconciliationRun {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  runType         String   @default("FULL_BATCH") @db.VarChar(50)
+  status          String   @default("COMPLETED") @db.VarChar(50)
+  documentsCount  Int      @default(0)
+  findingsCount   Int      @default(0)
+  totalExposure   Float    @default(0.0)
+  summaryJson     String?  @db.Text
+  createdAt       DateTime @default(now())
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  findings        DiscrepancyFinding[]
+
+  @@index([organizationId])
+}
+
+model DiscrepancyFinding {
+  id                  String   @id @default(uuid()) @db.Uuid
+  organizationId      String   @db.Uuid
+  reconciliationRunId String?  @db.Uuid
+  supplierId          String?  @db.Uuid
+  purchaseOrderId     String?  @db.Uuid
+  invoiceId           String?  @db.Uuid
+  goodsReceiptId      String?  @db.Uuid
+  paymentId           String?  @db.Uuid
+  creditNoteId        String?  @db.Uuid
+  poNumber            String?  @db.VarChar(100)
+  invoiceNumber       String?  @db.VarChar(100)
+  
+  findingCode         String   @db.VarChar(50)
+  ruleId              String   @db.VarChar(100)
+  category            String   @db.VarChar(50)
+  severity            String   @default("MEDIUM") @db.VarChar(20)
+  status              String   @default("OPEN") @db.VarChar(30)
+  
+  title               String   @db.VarChar(255)
+  description         String   @db.Text
+  
+  grossDiscrepancy    Float    @default(0.0)
+  amountPaid          Float    @default(0.0)
+  unpaidDisputedAmount Float   @default(0.0)
+  potentialOverpayment Float   @default(0.0)
+  potentialRecoverable Float   @default(0.0)
+  confirmedAmount     Float    @default(0.0)
+  recoveredAmount     Float    @default(0.0)
+  exposureGroupId     String?  @db.VarChar(100)
+  
+  financialImpactScore Float   @default(50.0)
+  anomalyConfidence   Float    @default(90.0)
+  fraudSuspicionScore Float    @default(20.0)
+  compositeRiskScore  Float    @default(45.0)
+  
+  expectedValue       String?  @db.Text
+  observedValue       String?  @db.Text
+  varianceCalculation String?  @db.Text
+  recommendedAction   String?  @db.Text
+  assignedToUserId    String?  @db.Uuid
+  assignedAuditorName String?  @db.VarChar(255)
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  organization        Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  reconciliationRun   ReconciliationRun? @relation(fields: [reconciliationRunId], references: [id])
+  supplier            Supplier?          @relation(fields: [supplierId], references: [id])
+  purchaseOrder       PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id])
+  invoice             Invoice?           @relation(fields: [invoiceId], references: [id])
+  goodsReceipt        GoodsReceipt?      @relation(fields: [goodsReceiptId], references: [id])
+  payment             Payment?           @relation(fields: [paymentId], references: [id])
+  creditNote          CreditNote?        @relation(fields: [creditNoteId], references: [id])
+  assignedAuditor     User?              @relation("AssignedAuditor", fields: [assignedToUserId], references: [id])
+  
+  evidences           FindingEvidence[]
+  riskSignals         RiskSignal[]
+  investigations      Investigation[]
+  comments            ReviewerComment[]
+  recoveries          RecoveryRecord[]
+
+  @@unique([organizationId, findingCode])
+  @@index([organizationId])
+  @@index([category])
+  @@index([severity])
+  @@index([status])
+}
+
+model FindingEvidence {
+  id              String   @id @default(uuid()) @db.Uuid
+  findingId       String   @db.Uuid
+  documentType    String   @db.VarChar(50)
+  documentNumber  String   @db.VarChar(100)
+  documentDate    DateTime?
+  sourceField     String?  @db.VarChar(100)
+  sourceValue     String?  @db.Text
+  pageNumber      Int?
+  fileReference   String?  @db.Text
+  isContradicting Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  finding         DiscrepancyFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@index([findingId])
+}
+
+model RiskSignal {
+  id              String   @id @default(uuid()) @db.Uuid
+  findingId       String   @db.Uuid
+  signalType      String   @db.VarChar(100)
+  description     String   @db.Text
+  weight          Float    @default(1.0)
+  createdAt       DateTime @default(now())
+
+  finding         DiscrepancyFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@index([findingId])
+}
+
+model Investigation {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  findingId       String   @db.Uuid
+  queryText       String   @db.Text
+  aiResponseText  String   @db.Text
+  factsIdentified String?  @db.Text
+  hypothesesGiven String?  @db.Text
+  neutralSupplierDraft String? @db.Text
+  confidenceScore Float    @default(0.9)
+  createdAt       DateTime @default(now())
+
+  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  finding         DiscrepancyFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([findingId])
+}
+
+model ReviewerComment {
+  id              String   @id @default(uuid()) @db.Uuid
+  findingId       String   @db.Uuid
+  userId          String?  @db.Uuid
+  authorName      String   @db.VarChar(255)
+  commentText     String   @db.Text
+  previousStatus  String?  @db.VarChar(30)
+  newStatus       String?  @db.VarChar(30)
+  createdAt       DateTime @default(now())
+
+  finding         DiscrepancyFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  user            User?              @relation(fields: [userId], references: [id])
+
+  @@index([findingId])
+}
+
+model Approval {
+  id              String   @id @default(uuid()) @db.Uuid
+  findingId       String   @db.Uuid
+  approverId      String   @db.Uuid
+  actionTaken     String   @db.VarChar(50)
+  notes           String?  @db.Text
+  createdAt       DateTime @default(now())
+
+  user            User     @relation(fields: [approverId], references: [id])
+
+  @@index([findingId])
+}
+
+model RecoveryRecord {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  findingId       String   @db.Uuid
+  recoveredAmount Float
+  recoveryMethod  String   @db.VarChar(50)
+  recoveryReference String @db.VarChar(100)
+  recoveredDate   DateTime
+  notes           String?  @db.Text
+  createdAt       DateTime @default(now())
+
+  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  finding         DiscrepancyFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([findingId])
+}
+
+model RuleConfiguration {
+  id                  String   @id @default(uuid()) @db.Uuid
+  organizationId      String   @db.Uuid
+  ruleKey             String   @db.VarChar(100)
+  ruleName            String   @db.VarChar(255)
+  description         String   @db.Text
+  category            String   @db.VarChar(50)
+  valueString         String   @db.VarChar(100)
+  valueFloat          Float?
+  isActive            Boolean  @default(true)
+  versionNumber       Int      @default(1)
+  updatedBy           String?  @db.VarChar(255)
+  updatedAt           DateTime @updatedAt
+  createdAt           DateTime @default(now())
+
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, ruleKey])
+  @@index([organizationId])
+}
+
+model AuditEvent {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  userId          String?  @db.Uuid
+  userName        String?  @db.VarChar(255)
+  action          String   @db.VarChar(100)
+  resourceType    String   @db.VarChar(100)
+  resourceId      String   @db.VarChar(100)
+  detailsJson     String?  @db.Text
+  ipAddress       String?  @db.VarChar(50)
+  timestamp       DateTime @default(now())
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user            User?        @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([timestamp])
+}
