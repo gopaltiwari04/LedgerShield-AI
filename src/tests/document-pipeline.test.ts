@@ -5,7 +5,7 @@ import { parseStructuredDocument } from "../lib/documents/parser";
 import { prisma } from "../lib/prisma";
 
 describe("LedgerShield Document Ingestion & Verification Pipeline", () => {
-  const testOrgId = "test-doc-org-1";
+  const testOrgId = "a0000000-0000-4000-a000-000000000001";
 
   before(async () => {
     await prisma.organization.upsert({
